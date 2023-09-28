@@ -1,6 +1,6 @@
 ﻿namespace HNBestStories.Dto
 {
-    public class BestStoryDto
+    public class StoryFetchDto
     {
         public string? Title { get; set; }
         public string? Url { get; set; }

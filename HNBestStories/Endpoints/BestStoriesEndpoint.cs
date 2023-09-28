@@ -12,10 +12,10 @@ namespace HNBestStories.Endpoints
             });
         }
 
-        private static async Task<IResult> GetBestStories(HNBestStoriesService bestStoriesService, int number)
+        private static async Task<IResult> GetBestStories(HNBestStoriesService bestStoriesService, int n)
         {
-            var bestStories = (await bestStoriesService.GetBestStories(number)).Select(s => s.Story);
-            return Results.Ok(bestStories);
+            var bestStories = await bestStoriesService.GetBestStories(n);
+            return Results.Ok(bestStories.OrderByDescending(s => s.Score));
         }
 
     }

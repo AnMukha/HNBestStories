@@ -1,6 +1,6 @@
 ﻿namespace HNBestStories.Dto
 {
-    public class StoryInResponseDto
+    public class StoryResponseDto
     {
         public string? Title { get; set; }
         public string? Uri { get; set; }

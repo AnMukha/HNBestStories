@@ -4,25 +4,25 @@ using System.Text.Json;
 
 namespace HNBestStories.Services
 {
-    public class StoriesFetcher
+    public class StoriesFetcher: IStoriesFetcher
     {
 
         private readonly HttpClient _httpClient;
-        IOptions<Options> _options;
+        private readonly IOptions<AppOptions> _options;
         private static readonly JsonSerializerOptions jsonOptions = new() { PropertyNameCaseInsensitive = true };        
 
-        public StoriesFetcher(HttpClient httpClient, IOptions<Options> options)
+        public StoriesFetcher(HttpClient httpClient, IOptions<AppOptions> options)
         {
             _options = options;
             _httpClient = httpClient;
             _httpClient.BaseAddress = new Uri(options.Value.APIUrl);            
         }
 
-        public async Task<List<(int id, BestStoryDto story)>> FetchStories(IEnumerable<int> storyIds)
+        public async Task<List<(int id, StoryFetchDto story)>> FetchStories(IEnumerable<int> storyIds)
         {
             var portionSize = _options.Value.NumberOfParallelRequests;
             var idArray = storyIds.ToArray();
-            var result = new List<(int, BestStoryDto)>();
+            var result = new List<(int id, StoryFetchDto story)>();
             for (var i = 0; i < idArray.Length; i += portionSize)
             {
                 var endPos = Math.Min(i + portionSize, idArray.Length);
@@ -31,14 +31,14 @@ namespace HNBestStories.Services
             return result;
         }
 
-        private async Task<List<(int, BestStoryDto)>> FetchStoriesInParallel(int[] ids)
+        private async Task<List<(int, StoryFetchDto)>> FetchStoriesInParallel(int[] ids)
         {
             var tasksByIds = ids.Select(id => (id, task: _httpClient.GetStringAsync($"item/{id}.json"))).ToArray();
             await Task.WhenAll(tasksByIds.Select(t => t.task));
-            var result = new List<(int, BestStoryDto)>();
+            var result = new List<(int, StoryFetchDto)>();
             foreach (var (id, task) in tasksByIds)
             {
-                var storyDto = JsonSerializer.Deserialize<BestStoryDto>(await task, jsonOptions);
+                var storyDto = JsonSerializer.Deserialize<StoryFetchDto>(await task, jsonOptions);
                 if (storyDto is not null)
                 {
                     result.Add((id, storyDto));

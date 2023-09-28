@@ -1,6 +1,6 @@
 ﻿namespace HNBestStories
 {
-    public class Options
+    public class AppOptions
     {
         public int NumberOfParallelRequests { get; set; } = 10;
         public string APIUrl { get; set; } = "https://hacker-news.firebaseio.com/v0/";

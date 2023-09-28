@@ -2,9 +2,9 @@
 {
     public static class Mapper
     {
-        public static StoryInResponseDto MapStoryToResponseDto(BestStoryDto story)
+        public static StoryResponseDto MapStoryToResponseDto(StoryFetchDto story)
         {
-            return new StoryInResponseDto()
+            return new StoryResponseDto()
             {
                 PostedBy = story.By,
                 CommentCount = story.Kids?.Count() ?? 0,

@@ -8,9 +8,10 @@ namespace HNBestStories.Services
     public class HNBestStoriesService
     {        
         private readonly IMemoryCache _cache;
-        private readonly StoriesFetcher _storiesFetcher;
+        private readonly IStoriesFetcher _storiesFetcher;
         private readonly HttpClient _httpClient;
-        private IOptions<Options> _options;
+        private readonly IOptions<AppOptions> _options;
+        private readonly ILogger<HNBestStoriesService> _logger;
 
         private const string IdsCacheKey = "ids_key";
         private const string BestStoriesAddress = "beststories.json";
@@ -18,34 +19,52 @@ namespace HNBestStories.Services
         private readonly SemaphoreSlim _idsReadSemaphore = new(1, 1);
         private readonly SemaphoreSlim _storiesReadSemaphore = new(1, 1);
 
-        public HNBestStoriesService(HttpClient httpClient, IMemoryCache cache, StoriesFetcher storiesFetcher, IOptions<Options> options)
+        public HNBestStoriesService(HttpClient httpClient, 
+                                    IMemoryCache cache, 
+                                    IStoriesFetcher storiesFetcher, 
+                                    IOptions<AppOptions> options,
+                                    ILogger<HNBestStoriesService> logger)
         {
             _options = options;
             _cache = cache;
             _storiesFetcher = storiesFetcher;
             _httpClient = httpClient;
-            _httpClient.BaseAddress = new Uri(options.Value.APIUrl);            
+            _httpClient.BaseAddress = new Uri(options.Value.APIUrl);
+            _logger = logger;
         }
 
-        public async Task<IEnumerable<IdAndStoryPair>> GetBestStories(int number)
+        public async Task<List<StoryResponseDto>> GetBestStories(int number)
         {
-            var allStoriesIds = await GetStoriesIds() ?? throw new Exception();
-            var requestedStoriesIds = allStoriesIds.Take(number).ToArray();
-            return await GetStories(requestedStoriesIds);            
+            _logger.LogInformation("Received request for {number} best stories.", number);
+            var allStoriesIds = await GetStoriesIds() ?? throw new Exception("Failed to retrieve story IDs.");
+            _logger.LogDebug("Rreceived story IDs.");            
+            var result = await GetStories(allStoriesIds[..number]);
+            _logger.LogInformation("Rreceived {Count} stories from HN API.", result.Count);            
+            return result;
         }
 
-        private async Task<IEnumerable<int>?> GetStoriesIds()
+        private async Task<int[]?> GetStoriesIds()
         {
-            if (_cache.TryGetValue(IdsCacheKey, out IEnumerable<int>? idsFromCache)) return idsFromCache;
+            if (_cache.TryGetValue(IdsCacheKey, out int[]? idsFromCache))
+            {
+                _logger.LogDebug("Successfully retrieved story IDs from cache.");
+                return idsFromCache;                
+            }
 
             await _idsReadSemaphore.WaitAsync();
             try
-            {                                
-                if (_cache.TryGetValue(IdsCacheKey, out IEnumerable<int>? idsAppeared)) return idsAppeared;
+            {
+                if (_cache.TryGetValue(IdsCacheKey, out int[]? idsAppeared))
+                {
+                    _logger.LogDebug("Successfully fetched story IDs from cache following thread unlock.");
+                    return idsAppeared;
+                }
 
                 var idsResponse = await _httpClient.GetStringAsync(BestStoriesAddress);
+                _logger.LogDebug("Successfully fetched IDs from HN API.");
                 var ids = JsonSerializer.Deserialize<IEnumerable<int>>(idsResponse)?.ToArray();
                 _cache.Set(IdsCacheKey, ids, TimeSpan.FromSeconds(_options.Value.IdsCacheExpirationSecounds));
+                _logger.LogDebug("IDs was deserialized and updated in the cache.");
                 return ids;
             }
             finally
@@ -54,34 +73,44 @@ namespace HNBestStories.Services
             }
         }
 
-        private async Task<IEnumerable<IdAndStoryPair>> GetStories(int[] requestedStoriesIds)
-        {                        
-
-            var storiesToFill = requestedStoriesIds.Select(id => new IdAndStoryPair(id, null));
-            var filledFromCache = FillStoriesFromCache(storiesToFill);
-            if (filledFromCache.All(s => s.Story is not null)) return filledFromCache;
+        private async Task<List<StoryResponseDto>> GetStories(int[] requestedStoriesIds)
+        {
+            var readedFromCache = GetStoriesFromCache(requestedStoriesIds);
+            if (readedFromCache.Count == requestedStoriesIds.Length)
+            {
+                _logger.LogDebug("Successfully retrieved {Length} stories from cache.", requestedStoriesIds.Length);
+                return readedFromCache.Select(s => s.story).ToList();
+            }
 
             await _storiesReadSemaphore.WaitAsync();
             try
             {
-                var filledAfterWait = FillStoriesFromCache(filledFromCache);
-                if (filledAfterWait.All(s => s.Story is not null)) return filledAfterWait;                
+                var readedAfterWait = GetStoriesFromCache(requestedStoriesIds);
+                if (readedAfterWait.Count == requestedStoriesIds.Length)
+                {
+                    _logger.LogDebug("Successfully retrieved {Length} stories from cache following thread unlock.", requestedStoriesIds.Length);
+                    return readedAfterWait.Select(s => s.story).ToList();
+                }
 
-                var fetchedStories = await _storiesFetcher.FetchStories(filledAfterWait.Where(s => s.Story is null).Select(s => s.Id));                
-                var storiesById = fetchedStories.ToDictionary(s => s.id, s => Mapper.MapStoryToResponseDto(s.story));
-                storiesById.Select(s => _cache.Set(s.Key, s.Value, TimeSpan.FromSeconds(_options.Value.StoriesCacheExpirationSecounds))).ToArray();
-                
-                return filledAfterWait.Select(s => new IdAndStoryPair(s.Id, s.Story ?? storiesById[s.Id]));
+                var idsToFetch = requestedStoriesIds.Except(readedAfterWait.Select(s => s.id)).ToArray();
+                var fetchedStories = await _storiesFetcher.FetchStories(idsToFetch);
+                _logger.LogDebug("Successfully fetched {Length} stories from HN API.", fetchedStories.Count);
+
+                var fechedToResponse = fetchedStories.Select(s => (s.id, story: Mapper.MapStoryToResponseDto(s.story))).ToList();
+                fechedToResponse.ForEach(s => _cache.Set(s.id, s.story, TimeSpan.FromSeconds(_options.Value.StoriesCacheExpirationSecounds)));
+                _logger.LogDebug("{Count} stories was deserialized and updated in the cache.", fechedToResponse.Count);
+
+                return readedAfterWait.Concat(fechedToResponse).Select(s => s.story).ToList();
             }
-            finally 
+            finally
             {
                 _storiesReadSemaphore.Release();
             }          
         }
 
-        private IdAndStoryPair[] FillStoriesFromCache(IEnumerable<IdAndStoryPair> storiesById)
-        {
-            return storiesById.Select(s => new IdAndStoryPair(s.Id, _cache.Get(s.Id) as StoryInResponseDto)).ToArray();
+        private List<(int id, StoryResponseDto story)> GetStoriesFromCache(IEnumerable<int> storiesId)
+        {            
+            return storiesId.Select(id => (id, story: _cache.Get(id) as StoryResponseDto)).Where(s => s.story is not null).ToList()!;
         }
     }
 }
