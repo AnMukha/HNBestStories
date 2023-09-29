@@ -14,6 +14,10 @@ namespace HNBestStories.Endpoints
 
         private static async Task<IResult> GetBestStories(HNBestStoriesService bestStoriesService, int n)
         {
+            if (n < 0)
+            {
+                return Results.BadRequest("Invalid value for n. It should be greater than or equal to 0.");
+            }
             var bestStories = await bestStoriesService.GetBestStories(n);
             return Results.Ok(bestStories.OrderByDescending(s => s.Score));
         }
