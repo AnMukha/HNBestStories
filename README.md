@@ -23,6 +23,7 @@ dotnet build
 Run the application:
 
 cd HNBestStories
+
 dotnet run
 
 Or simply open the solution in Visual Studio and press F5 to run.
