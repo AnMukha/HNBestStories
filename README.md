@@ -49,6 +49,7 @@ http://localhost:5177/swagger/index.html
   }
 
 These parameters limit the HN API load. Data is requested from the HN API only if cached data has not yet expired.
+To further expedite the loading of stories, requests can be executed in parallel. The NumberOfParallelRequests parameter specifies the number of stories that can be fetched concurrently.
 
 ### Potential Enhancements or Changes
 
